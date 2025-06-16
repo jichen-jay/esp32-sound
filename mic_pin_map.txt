@@ -1,3 +1,16 @@
 sclk    14
 lckl    12
 dout    33
+
+
+SD Card Pin	ESP32 GPIO	Function
+MISO/DAT0	GPIO 22	Data In
+MOSI/CMD	GPIO 19	Data Out
+SCK/CLK	GPIO 21	Clock
+CS/DAT3	GPIO 0	Chip Select
+VCC	3.3V	Power
+GND	GND	Ground
+Microphone wiring remains the same:
+
+CLK → GPIO 14
+DATA → GPIO 33

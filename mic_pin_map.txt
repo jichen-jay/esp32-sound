@@ -1,0 +1,3 @@
+sclk    14
+lckl    12
+dout    33

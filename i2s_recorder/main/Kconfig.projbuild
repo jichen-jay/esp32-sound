@@ -1,4 +1,4 @@
-menu "I2S Recorder Configuration"
+menu "T-Embed I2S Recorder Configuration"
 
     config EXAMPLE_BIT_SAMPLE
         int "Audio Bit Sample"
@@ -11,5 +11,41 @@ menu "I2S Recorder Configuration"
         default y
         help
             Format the SD card if mounting fails.
+
+    config T_EMBED_MIC_CLK_GPIO
+        int "T-Embed Microphone Clock GPIO"
+        default 39
+        help
+            GPIO pin for microphone clock signal on T-Embed.
+
+    config T_EMBED_MIC_DATA_GPIO
+        int "T-Embed Microphone Data GPIO"
+        default 42
+        help
+            GPIO pin for microphone data signal on T-Embed.
+
+    config T_EMBED_SD_CS_GPIO
+        int "T-Embed SD Card CS GPIO"
+        default 13
+        help
+            GPIO pin for SD card chip select on T-Embed.
+
+    config T_EMBED_SPI_MOSI_GPIO
+        int "T-Embed SPI MOSI GPIO"
+        default 9
+        help
+            GPIO pin for SPI MOSI on T-Embed.
+
+    config T_EMBED_SPI_MISO_GPIO
+        int "T-Embed SPI MISO GPIO"
+        default 10
+        help
+            GPIO pin for SPI MISO on T-Embed.
+
+    config T_EMBED_SPI_CLK_GPIO
+        int "T-Embed SPI Clock GPIO"
+        default 11
+        help
+            GPIO pin for SPI clock on T-Embed.
 
 endmenu

@@ -1,0 +1,28 @@
+SD card reader pin map
+
+SD_CS----->IO13
+SPI_MOSI----->IO9
+SPI_SCK----->IO11
+SPI_MISO----->IO10
+
+lcd pin map
+
+LCD_RES----->IO40
+LCD_CS----->IO41
+SPI_MOSI----->IO9
+SPI_SCK----->IO11
+SPI_MISO----->IO10
+II2C_SCL----->IO18
+II2C_SDA----->IO8
+T_RST----->IO46
+T_INT----->IO16
+BL_EN----->IO21
+
+microphone pin map
+
+Microphone Pin	Signal	ESP32 Connection	Function
+4	CLK	IO39	I2S Bit Clock (BCLK)
+5	DATA	IO42	I2S Data In (DIN)
+6	VCC	VDD3V3	3.3V Power Supply
+2	SELECT	GND (via R47)	Channel Select. Tying to Ground configures it as the "Left" channel.
+1, 3	GND	GND	Ground

@@ -1,18 +1,16 @@
 [build]
 # Set default target based on your current board
-# Change this line when switching between C6 and H2
-target = "riscv32imc-esp-espidf" # For ESP32-C6
-# target = "riscv32imac-esp-espidf"  # For ESP32-H2
+target = "riscv32imc-unknown-none-elf" # For ESP32-C6
+# target = "xtensa-esp32s3-none-elf"      # For ESP32-S3
 
-[target.riscv32imc-esp-espidf]
+[target.riscv32imc-unknown-none-elf]
 runner = "espflash flash --monitor"
 
-[target.riscv32imac-esp-espidf]
+[target.xtensa-esp32s3-none-elf]
 runner = "espflash flash --monitor"
 
 [unstable]
-build-std = ["std", "panic_abort"]
+build-std = ["core"]
 
 [env]
-# Rust build std library from source
-RUSTFLAGS = "-C target-cpu=native -C opt-level=s"
+RUSTFLAGS = "-C force-frame-pointers=yes"

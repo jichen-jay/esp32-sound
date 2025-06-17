@@ -5,21 +5,27 @@ edition = "2021"
 
 [dependencies]
 esp-backtrace = { version = "0.14.2", features = [
-    "esp32s3",
     "exception-handler",
     "panic-handler",
     "println",
 ] }
-esp-hal = { version = "0.21.0", features = ["esp32s3"] }
-esp-println = { version = "0.12.0", features = ["esp32s3", "log"] }
+esp-hal = { version = "0.21.0" }
+esp-println = { version = "0.12.0", features = ["log"] }
 log = { version = "0.4.21" }
+# ESP-IDF system integration
+esp-idf-sys = { version = "0.35.0", features = ["native"] }
+
+# Features for different target chips
+[features]
+default = []
+esp32c6 = ["esp-backtrace/esp32c6", "esp-hal/esp32c6", "esp-println/esp32c6"]
+esp32h2 = ["esp-backtrace/esp32h2", "esp-hal/esp32h2", "esp-println/esp32h2"]
 
 [profile.dev]
-# Rust debug is too slow. For debug builds always builds with some optimization
 opt-level = "s"
 
 [profile.release]
-codegen-units = 1        # LLVM can perform better optimizations using a single thread
+codegen-units = 1
 debug = 2
 debug-assertions = false
 incremental = false
@@ -27,16 +33,14 @@ lto = 'fat'
 opt-level = 's'
 overflow-checks = false
 
+# Build standard library from source for ESP-IDF targets
+[unstable]
+build-std = ["std", "panic_abort"]
+
 [[bin]]
 name = "esp32-sound"
 test = false
 bench = false
-
-[patch.crates-io]
-esp-hal = { git = "https://github.com/esp-rs/esp-hal.git" }
-
-[target.xtensa-esp32s3-none-elf]
-runner = "espflash flash --monitor"
 
 [build-dependencies]
 embuild = { version = "0.33", features = ["espidf"] }

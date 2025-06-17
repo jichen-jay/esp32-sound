@@ -1,2 +1,7 @@
 [toolchain]
 channel = "esp"
+components = ["rust-src"]
+
+# Pin to a specific date to avoid breaking changes
+# This version is known to work with esp-hal
+date = "2024-10-15"

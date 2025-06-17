@@ -1,41 +1,54 @@
 //! ESP32 I2S Audio Communication System
-//! Supports both sending and receiving audio data between two ESP32 devices
-//! Compatible with ESP32-S3 based devices (ESP32-DOWDQ6 v3 and T-Embed)
+//! ESP32-C6 (Sender) ↔ ESP32-H2 (Receiver)
+//! Transmits Happy Birthday song between two ESP32 devices
 
 #![no_std]
 #![no_main]
 
-use esp_backtrace as _;
 use esp_hal::{
     delay::Delay,
-    dma::{Dma, DmaPriority, DmaTxBuf, DmaRxBuf},
     dma_buffers,
     gpio::{Io, Level, Output},
-    i2s::master::{DataFormat, I2s, Standard},
+    i2s::master::{DataFormat, I2s, Standard},  // Updated import
     prelude::*,
-    system::SystemControl,
     time::Rate,
-    timer::timg::TimerGroup,
 };
 use esp_println::println;
+use core::panic::PanicInfo;
+use esp_backtrace as _;
 
-// Include the generated audio data
-// You'll need to run the Python script first to generate this file
-include!("happy_birthday_audio.rs");
+// Mock audio data for testing - replace with your generated audio
+const HAPPY_BIRTHDAY_AUDIO: &[u8] = &[
+    0x00, 0x00, 0x00, 0x10, 0x00, 0x20, 0x00, 0x30,
+    0x00, 0x40, 0x00, 0x50, 0x00, 0x60, 0x00, 0x70,
+    0x00, 0x80, 0x00, 0x90, 0x00, 0xA0, 0x00, 0xB0,
+    0x00, 0xC0, 0x00, 0xD0, 0x00, 0xE0, 0x00, 0xF0,
+    // Add more data or include your generated happy_birthday_audio.rs
+];
+
+const SAMPLE_RATE: u32 = 16000;
 
 // I2S Configuration
-const I2S_SAMPLE_RATE: u32 = SAMPLE_RATE;
 const I2S_DATA_FORMAT: DataFormat = DataFormat::Data16Channel16;
 const I2S_STANDARD: Standard = Standard::Philips;
 
-// DMA Buffer sizes - must be large enough for audio chunks
-const TX_BUFFER_SIZE: usize = 4096;
-const RX_BUFFER_SIZE: usize = 4096;
+// DMA Buffer sizes
+const TX_BUFFER_SIZE: usize = 1024;
+const RX_BUFFER_SIZE: usize = 1024;
 
-// Device mode selection - change this to switch between sender/receiver
+// Device mode - change this based on which device you're flashing
+// ESP32-C6 = Sender, ESP32-H2 = Receiver
+#[cfg(feature = "esp32c6")]
 const DEVICE_MODE: DeviceMode = DeviceMode::Sender;
 
-#[derive(Clone, Copy)]
+#[cfg(feature = "esp32h2")]
+const DEVICE_MODE: DeviceMode = DeviceMode::Receiver;
+
+// Default to sender if no feature is specified
+#[cfg(not(any(feature = "esp32c6", feature = "esp32h2")))]
+const DEVICE_MODE: DeviceMode = DeviceMode::Sender;
+
+#[derive(Clone, Copy, Debug)]
 enum DeviceMode {
     Sender,
     Receiver,
@@ -43,71 +56,77 @@ enum DeviceMode {
 
 #[entry]
 fn main() -> ! {
-    let system = SystemControl::new();
-    let mut peripheral_clock_control = system.peripheral_clock_control;
-    let clocks = esp_hal::clock::ClockControl::max(&mut peripheral_clock_control)
-        .freeze();
+    let peripherals = esp_hal::init(esp_hal::Config::default());
+    let delay = Delay::new();
+    let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
-    let delay = Delay::new(&clocks);
-    let io = Io::new(esp_hal::gpio::Gpio::new(), io::Interrupt::IO);
+    // Updated DMA channel access
+    #[cfg(any(esp32, esp32s2))]
+    let dma_channel = peripherals.DMA_I2S0;
+    
+    #[cfg(not(any(esp32, esp32s2)))]
+    let dma_channel = peripherals.DMA_CH0;
 
-    println!("ESP32 I2S Audio Communication System");
-    println!("Device mode: {:?}", DEVICE_MODE);
-
-    // Initialize DMA
-    let dma = Dma::new(&mut peripheral_clock_control.dma);
-    let dma_channel = dma.channel0;
-
-    // Create DMA buffers
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = 
         dma_buffers!(RX_BUFFER_SIZE, TX_BUFFER_SIZE);
 
-    // Configure I2S pins based on your hardware
-    // Adjust these pin assignments for your specific boards
+    // Updated I2S construction
     let i2s = I2s::new(
-        esp_hal::peripheral::Peripheral::I2S0,
+        peripherals.I2S0,
         I2S_STANDARD,
         I2S_DATA_FORMAT,
-        Rate::from_hz(I2S_SAMPLE_RATE),
+        Rate::from_hz(SAMPLE_RATE),
         dma_channel,
     );
 
-    // Configure pins - adjust these for your hardware
-    // For ESP32-S3 T-Embed and similar boards
     match DEVICE_MODE {
         DeviceMode::Sender => {
-            run_sender(i2s, tx_buffer, tx_descriptors, io, delay);
+            let i2s_tx = i2s
+                .i2s_tx
+                .with_bclk(io.pins.gpio4)
+                .with_ws(io.pins.gpio5)
+                .with_dout(io.pins.gpio6)
+                .build(tx_descriptors);
+            
+            run_sender(i2s_tx, tx_buffer, io, delay);
         }
         DeviceMode::Receiver => {
-            run_receiver(i2s, rx_buffer, rx_descriptors, io, delay);
+            let i2s_rx = i2s
+                .i2s_rx
+                .with_bclk(io.pins.gpio4)
+                .with_ws(io.pins.gpio5)
+                .with_din(io.pins.gpio6)
+                .build(rx_descriptors);
+            
+            run_receiver(i2s_rx, rx_buffer, io, delay);
         }
     }
 }
 
 fn run_sender(
-    i2s: I2s<esp_hal::Blocking>,
+    mut i2s_tx: esp_hal::i2s::master::I2sTx<'static, esp_hal::Blocking>,  // Correct type
     tx_buffer: &'static mut [u8],
-    tx_descriptors: &'static mut [esp_hal::dma::DmaDescriptor],
     io: Io,
     mut delay: Delay,
 ) -> ! {
-    println!("Initializing as SENDER");
+    println!("Initializing ESP32-C6 as SENDER");
 
-    // Configure I2S TX pins
-    let i2s_tx = i2s.i2s_tx
-        .with_bclk(io.pins.gpio1)      // Bit clock
-        .with_ws(io.pins.gpio2)        // Word select
-        .with_dout(io.pins.gpio3)      // Data out
-        .build(tx_descriptors);
-
-    // Status LED
+    // Status LED - using GPIO8 (commonly available on dev boards)
     let mut led = Output::new(io.pins.gpio8, Level::Low);
 
-    println!("Starting audio transmission...");
+    println!("I2S TX configured:");
+    println!("  BCLK: GPIO4");
+    println!("  WS:   GPIO5"); 
+    println!("  DOUT: GPIO6");
     println!("Audio data size: {} bytes", HAPPY_BIRTHDAY_AUDIO.len());
 
+    let mut transmission_count = 0;
+
     loop {
+        transmission_count += 1;
         led.set_high();
+        
+        println!("=== Transmission #{} ===", transmission_count);
         
         // Copy audio data to DMA buffer in chunks
         let mut offset = 0;
@@ -119,76 +138,75 @@ fn run_sender(
                 &HAPPY_BIRTHDAY_AUDIO[offset..offset + chunk_size]
             );
             
-            // Transmit chunk
-            println!("Transmitting audio chunk: {} bytes at offset {}", chunk_size, offset);
+            // Convert bytes to u16 for I2S transmission
+            let words = unsafe { 
+                core::slice::from_raw_parts(
+                    tx_buffer.as_ptr() as *const u16,
+                    chunk_size / 2
+                )
+            };
             
-            if let Err(e) = i2s_tx.write_words(
-                unsafe { 
-                    core::slice::from_raw_parts(
-                        tx_buffer.as_ptr() as *const u16,
-                        chunk_size / 2
-                    )
+            println!("TX: Sending {} bytes (offset: {})", chunk_size, offset);
+            
+            match i2s_tx.write_words(words) {
+                Ok(_) => {
+                    println!("TX: Chunk sent successfully");
                 }
-            ) {
-                println!("I2S write error: {:?}", e);
+                Err(e) => {
+                    println!("TX: I2S write error: {:?}", e);
+                }
             }
             
             offset += chunk_size;
-            delay.delay_millis(10); // Small delay between chunks
+            delay.delay_millis(50); // Delay between chunks
         }
         
         led.set_low();
-        println!("Audio transmission complete, waiting 2 seconds...");
-        delay.delay_millis(2000);
+        println!("TX: Transmission complete, waiting 3 seconds...");
+        delay.delay_millis(3000);
     }
 }
 
 fn run_receiver(
-    i2s: I2s<esp_hal::Blocking>,
+    mut i2s_rx: esp_hal::i2s::master::I2sRx<'static, esp_hal::Blocking>,  // Correct type
     rx_buffer: &'static mut [u8],
-    rx_descriptors: &'static mut [esp_hal::dma::DmaDescriptor],
     io: Io,
     mut delay: Delay,
 ) -> ! {
-    println!("Initializing as RECEIVER");
+    println!("Initializing ESP32-H2 as RECEIVER");
 
-    // Configure I2S RX pins
-    let mut i2s_rx = i2s.i2s_rx
-        .with_bclk(io.pins.gpio1)      // Bit clock
-        .with_ws(io.pins.gpio2)        // Word select  
-        .with_din(io.pins.gpio3)       // Data in
-        .build(rx_descriptors);
-
-    // Status LED
+    // Status LED - using GPIO8 
     let mut led = Output::new(io.pins.gpio8, Level::Low);
 
-    println!("Starting audio reception...");
+    println!("I2S RX configured:");
+    println!("  BCLK: GPIO4");
+    println!("  WS:   GPIO5");
+    println!("  DIN:  GPIO6");
+    println!("Waiting for audio data...");
+
+    let mut reception_count = 0;
 
     loop {
         led.set_high();
-        println!("Waiting for audio data...");
+        
+        // Convert buffer to u16 for I2S reception
+        let words = unsafe {
+            core::slice::from_raw_parts_mut(
+                rx_buffer.as_mut_ptr() as *mut u16,
+                rx_buffer.len() / 2
+            )
+        };
         
         // Receive audio data
-        if let Err(e) = i2s_rx.read_words(
-            unsafe {
-                core::slice::from_raw_parts_mut(
-                    rx_buffer.as_mut_ptr() as *mut u16,
-                    rx_buffer.len() / 2
-                )
+        match i2s_rx.read_words(words) {
+            Ok(_) => {
+                reception_count += 1;
+                println!("RX: Received {} bytes (reception #{})", rx_buffer.len(), reception_count);
+                process_received_audio(rx_buffer);
             }
-        ) {
-            println!("I2S read error: {:?}", e);
-        } else {
-            println!("Received {} bytes of audio data", rx_buffer.len());
-            
-            // Process received audio data here
-            // For example, you could:
-            // 1. Store it for playback
-            // 2. Analyze the audio
-            // 3. Forward it to another device
-            // 4. Apply audio processing
-            
-            process_received_audio(rx_buffer);
+            Err(e) => {
+                println!("RX: I2S read error: {:?}", e);
+            }
         }
         
         led.set_low();
@@ -207,10 +225,15 @@ fn process_received_audio(audio_data: &[u8]) {
     
     let mut sum: i32 = 0;
     let mut max_amplitude: i16 = 0;
+    let mut non_zero_samples = 0;
     
     for &sample in samples.iter() {
-        sum += sample.abs() as i32;
-        max_amplitude = max_amplitude.max(sample.abs());
+        let abs_sample = sample.abs();
+        sum += abs_sample as i32;
+        max_amplitude = max_amplitude.max(abs_sample);
+        if abs_sample > 0 {
+            non_zero_samples += 1;
+        }
     }
     
     let avg_amplitude = if samples.len() > 0 { 
@@ -219,24 +242,24 @@ fn process_received_audio(audio_data: &[u8]) {
         0 
     };
     
-    println!("Audio stats - Avg amplitude: {}, Max amplitude: {}", 
-             avg_amplitude, max_amplitude);
+    println!("Audio Analysis:");
+    println!("  Samples: {}, Non-zero: {}", samples.len(), non_zero_samples);
+    println!("  Avg amplitude: {}, Max: {}", avg_amplitude, max_amplitude);
     
-    // Detect if there's meaningful audio content
+    // Detect signal strength
     if avg_amplitude > 1000 {
-        println!("Strong audio signal detected!");
+        println!("  🔊 Strong audio signal detected!");
     } else if avg_amplitude > 100 {
-        println!("Weak audio signal detected");
+        println!("  🔉 Weak audio signal detected");
+    } else if non_zero_samples > 0 {
+        println!("  📶 Minimal signal detected");
     } else {
-        println!("No significant audio signal");
+        println!("  🔇 No audio signal");
+    }
+    
+    // Show first few samples for debugging
+    if samples.len() >= 4 {
+        println!("  First samples: {} {} {} {}", 
+                samples[0], samples[1], samples[2], samples[3]);
     }
 }
-
-// Panic handler
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    println!("Panic occurred: {:?}", info);
-    loop {}
-}
-
-use core::panic::PanicInfo;

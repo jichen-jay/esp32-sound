@@ -11,7 +11,7 @@ use esp_hal::{
     dma::{Dma, DmaPriority},
     dma_buffers,
     gpio::{Io, Level, Output},
-    i2s::{DataFormat, I2s, I2sWrite, I2sRead, Standard},
+    i2s::{DataFormat, I2s, I2sRead, I2sWrite, Standard},
     peripherals::Peripherals,
     prelude::*,
     system::SystemControl,
@@ -19,33 +19,55 @@ use esp_hal::{
 use esp_println::println;
 use esp_backtrace as _;
 
-// Include the generated Happy Birthday audio data
-// You'll need to generate this with your Python script
-include!("./happy_birthday_audio.rs");
+// Happy Birthday audio data - 16kHz, 16-bit, mono
+// This is a simplified version - you can replace with your generated data
+const HAPPY_BIRTHDAY_AUDIO: &[u8] = &[
+    // Simple sine wave pattern for demonstration
+    0x00, 0x00, 0x7f, 0x0c, 0xf8, 0x18, 0x6a, 0x24, 0xd5, 0x2e, 0x3c, 0x38,
+    0x9b, 0x40, 0xf0, 0x47, 0x3b, 0x4e, 0x7a, 0x53, 0xac, 0x57, 0xd0, 0x5a,
+    0xe5, 0x5c, 0xec, 0x5d, 0xe5, 0x5d, 0xd0, 0x5c, 0xac, 0x5a, 0x7a, 0x57,
+    0x3b, 0x53, 0xf0, 0x4d, 0x9b, 0x47, 0x3c, 0x40, 0xd5, 0x37, 0x6a, 0x2e,
+    0xf8, 0x23, 0x7f, 0x18, 0x00, 0x0c, 0x81, 0xff, 0x08, 0xf2, 0x96, 0xe4,
+    0x2b, 0xd7, 0xc4, 0xc9, 0x65, 0xbc, 0x10, 0xaf, 0xc5, 0xa1, 0x86, 0x94,
+    0x54, 0x87, 0x30, 0x7a, 0x1b, 0x6d, 0x14, 0x60, 0x1b, 0x53, 0x30, 0x46,
+    0x54, 0x39, 0x86, 0x2c, 0xc5, 0x1f, 0x10, 0x13, 0x65, 0x06, 0xc4, 0xf9,
+    0x2b, 0xed, 0x96, 0xe0, 0x08, 0xd4, 0x81, 0xc7, 0x00, 0xbb, 0x7f, 0xae,
+    0xf8, 0xa1, 0x6a, 0x95, 0xd5, 0x88, 0x3c, 0x7c, 0x9b, 0x6f, 0xf0, 0x62,
+    0x3b, 0x56, 0x7a, 0x49, 0xac, 0x3c, 0xd0, 0x2f, 0xe5, 0x22, 0xec, 0x15,
+    0xe5, 0x08, 0xd0, 0xfb, 0xac, 0xee, 0x7a, 0xe1, 0x3b, 0xd4, 0xf0, 0xc6,
+    0x9b, 0xb9, 0x3c, 0xac, 0xd5, 0x9e, 0x6a, 0x91, 0xf8, 0x83, 0x7f, 0x76,
+];
+
+const SAMPLE_RATE: u32 = 16000;
 
 // I2S Configuration
 const I2S_DATA_FORMAT: DataFormat = DataFormat::Data16Channel16;
 const I2S_STANDARD: Standard = Standard::Philips;
 
 // DMA Buffer sizes
-const TX_BUFFER_SIZE: usize = 1024;
-const RX_BUFFER_SIZE: usize = 1024;
+const TX_BUFFER_SIZE: usize = 512;
+const RX_BUFFER_SIZE: usize = 512;
 
-// Device mode - change this based on which device you're flashing
-#[cfg(feature = "esp32c6")]
+// Device mode - ESP32-C6 is sender by default
 const DEVICE_MODE: DeviceMode = DeviceMode::Sender;
-
-#[cfg(feature = "esp32h2")]
-const DEVICE_MODE: DeviceMode = DeviceMode::Receiver;
 
 #[derive(Clone, Copy, Debug)]
 enum DeviceMode {
     Sender,
+    #[allow(dead_code)]
     Receiver,
 }
 
 #[entry]
 fn main() -> ! {
+
+       esp_println::println!("=== APPLICATION STARTING ===");
+    
+    let peripherals = Peripherals::take();
+    esp_println::println!("Peripherals taken");
+    
+    let system = SystemControl::new(peripherals.SYSTEM);
+    esp_println::println!("System control initialized");
     let peripherals = Peripherals::take();
     let system = SystemControl::new(peripherals.SYSTEM);
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
@@ -57,7 +79,7 @@ fn main() -> ! {
     let dma = Dma::new(peripherals.DMA);
     let dma_channel = dma.channel0.configure(false, DmaPriority::Priority0);
 
-    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = 
+    let (_rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = 
         dma_buffers!(RX_BUFFER_SIZE, TX_BUFFER_SIZE);
 
     // Create I2S instance
@@ -122,12 +144,33 @@ fn main() -> ! {
                     
                     chunk_count += 1;
                     
-                    // Send the chunk using blocking write
-                    i2s_tx.write(&tx_buffer[..chunk_size]).unwrap();
+                    // Convert bytes to u16 words for I2S
+                    let mut words: [u16; 256] = [0; 256]; // Max chunk size / 2
+                    let word_count = chunk_size / 2;
                     
-                    println!("  Chunk {}: {} bytes sent", chunk_count, chunk_size);
+                    for i in 0..word_count {
+                        if i * 2 + 1 < chunk_size {
+                            // Convert little-endian bytes to u16
+                            words[i] = u16::from_le_bytes([
+                                tx_buffer[i * 2],
+                                tx_buffer[i * 2 + 1]
+                            ]);
+                        }
+                    }
+                    
+                    // Send the chunk using blocking write
+                    match i2s_tx.write(&words[..word_count]) {
+                        Ok(_) => {
+                            println!("  Chunk {}: {} words sent", chunk_count, word_count);
+                        }
+                        Err(e) => {
+                            println!("  Error sending chunk {}: {:?}", chunk_count, e);
+                            break;
+                        }
+                    }
                     
                     bytes_sent += chunk_size;
+                    delay.delay_millis(10); // Small delay between chunks
                 }
                 
                 led.set_low();
@@ -137,12 +180,12 @@ fn main() -> ! {
             }
         }
         DeviceMode::Receiver => {
-            println!("Configuring as RECEIVER (ESP32-H2)");
+            println!("Configuring as RECEIVER");
             
-            // ESP32-H2 pins for I2S RX - using same GPIO numbers for convenience
-            let bclk = io.pins.gpio4;   // Same as sender
-            let ws = io.pins.gpio5;     // Same as sender
-            let din = io.pins.gpio6;    // Same pin as sender's DOUT
+            // ESP32 pins for I2S RX
+            let bclk = io.pins.gpio4;
+            let ws = io.pins.gpio5;
+            let din = io.pins.gpio6;
             
             let mut i2s_rx = i2s.i2s_rx
                 .with_bclk(bclk)
@@ -150,11 +193,11 @@ fn main() -> ! {
                 .with_din(din)
                 .build();
             
-            // Status LED - use available GPIO on H2
+            // Status LED
             let mut led = Output::new(io.pins.gpio8, Level::Low);
             
             // Receiver loop
-            println!("=== ESP32-H2 RECEIVER INITIALIZED ===");
+            println!("=== ESP32 RECEIVER INITIALIZED ===");
             println!("I2S RX Configuration:");
             println!("  BCLK: GPIO4");
             println!("  WS:   GPIO5");
@@ -163,21 +206,36 @@ fn main() -> ! {
             println!("Listening for audio data...\n");
 
             let mut reception_count = 0;
-            let mut total_bytes_received = 0;
 
             loop {
                 led.set_high();
                 
+                // Prepare buffer for receiving u16 words
+                let mut word_buffer: [u16; 256] = [0; 256];
+                
                 // Receive audio data using blocking read
-                i2s_rx.read(rx_buffer).unwrap();
-                
-                reception_count += 1;
-                total_bytes_received += rx_buffer.len();
-                
-                println!("Reception #{}: {} bytes", reception_count, rx_buffer.len());
-                
-                // Process the received audio
-                process_received_audio(rx_buffer);
+                match i2s_rx.read(&mut word_buffer) {
+                    Ok(_) => {
+                        reception_count += 1;
+                        println!("Reception #{}: {} words", reception_count, word_buffer.len());
+                        
+                        // Convert u16 words back to bytes for processing
+                        let mut byte_buffer: [u8; 512] = [0; 512];
+                        for (i, &word) in word_buffer.iter().enumerate() {
+                            let bytes = word.to_le_bytes();
+                            if i * 2 + 1 < byte_buffer.len() {
+                                byte_buffer[i * 2] = bytes[0];
+                                byte_buffer[i * 2 + 1] = bytes[1];
+                            }
+                        }
+                        
+                        // Process the received audio
+                        process_received_audio(&byte_buffer[..word_buffer.len() * 2]);
+                    }
+                    Err(e) => {
+                        println!("Error receiving audio: {:?}", e);
+                    }
+                }
                 
                 led.set_low();
                 delay.delay_millis(10);
@@ -188,6 +246,11 @@ fn main() -> ! {
 
 fn process_received_audio(audio_data: &[u8]) {
     // Convert bytes to i16 samples for analysis
+    if audio_data.len() < 2 {
+        println!("   🔇 No data");
+        return;
+    }
+    
     let samples = unsafe {
         core::slice::from_raw_parts(
             audio_data.as_ptr() as *const i16,

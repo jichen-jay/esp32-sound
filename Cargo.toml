@@ -5,37 +5,15 @@ edition = "2021"
 
 [dependencies]
 esp-backtrace = { version = "0.13.0", features = [
-    "esp32c6",
+    "esp32h2",
     "exception-handler",
     "panic-handler",
     "println",
 ] }
-esp-hal = { version = "0.20.1", features = ["esp32c6"] }
-esp-println = { version = "0.10.0", features = ["esp32c6"] }
+esp-println = { version = "0.10.0", features = ["esp32h2"] }
+esp-hal = { version = "0.20.1", features = ["esp32h2"] }
 critical-section = "1.1"
 portable-atomic = { version = "1.0", features = ["critical-section"] }
-
-[features]
-default = ["esp32c6"]
-esp32c6 = ["esp-backtrace/esp32c6", "esp-hal/esp32c6", "esp-println/esp32c6"]
-esp32h2 = ["esp-backtrace/esp32h2", "esp-hal/esp32h2", "esp-println/esp32h2"]
-
-[profile.dev]
-opt-level = "s"
-
-[profile.release]
-codegen-units = 1
-debug = 2
-debug-assertions = false
-incremental = false
-lto = 'fat'
-opt-level = 's'
-overflow-checks = false
-
-[[bin]]
-name = "esp32-sound"
-test = false
-bench = false
 
 [build-dependencies]
 embuild = { version = "0.33", features = ["espidf"] }

@@ -1,6 +1,6 @@
-//! ESP32-H2 I2S Audio Sender
-//! Transmits Happy Birthday song via I2S
-//! GPIO4: BCLK, GPIO5: WS, GPIO6: DOUT
+//! ESP32-H2 I2S FM-Style Pattern Generator
+//! Creates FM-like patterns using digital square waves through I2S
+//! GPIO4: BCLK, GPIO5: WS, GPIO12: DOUT
 
 #![no_std]
 #![no_main]
@@ -20,74 +20,29 @@ use esp_println::println;
 use esp_backtrace as _;
 use esp_hal::entry;
 
-// Happy Birthday audio data - 16kHz, 16-bit, mono
-const HAPPY_BIRTHDAY_AUDIO: &[u8] = &[
-    // Extended sine wave pattern for Happy Birthday melody
-    0x00, 0x00, 0x7f, 0x0c, 0xf8, 0x18, 0x6a, 0x24, 0xd5, 0x2e, 0x3c, 0x38,
-    0x9b, 0x40, 0xf0, 0x47, 0x3b, 0x4e, 0x7a, 0x53, 0xac, 0x57, 0xd0, 0x5a,
-    0xe5, 0x5c, 0xec, 0x5d, 0xe5, 0x5d, 0xd0, 0x5c, 0xac, 0x5a, 0x7a, 0x57,
-    0x3b, 0x53, 0xf0, 0x4d, 0x9b, 0x47, 0x3c, 0x40, 0xd5, 0x37, 0x6a, 0x2e,
-    0xf8, 0x23, 0x7f, 0x18, 0x00, 0x0c, 0x81, 0xff, 0x08, 0xf2, 0x96, 0xe4,
-    0x2b, 0xd7, 0xc4, 0xc9, 0x65, 0xbc, 0x10, 0xaf, 0xc5, 0xa1, 0x86, 0x94,
-    0x54, 0x87, 0x30, 0x7a, 0x1b, 0x6d, 0x14, 0x60, 0x1b, 0x53, 0x30, 0x46,
-    0x54, 0x39, 0x86, 0x2c, 0xc5, 0x1f, 0x10, 0x13, 0x65, 0x06, 0xc4, 0xf9,
-    0x2b, 0xed, 0x96, 0xe0, 0x08, 0xd4, 0x81, 0xc7, 0x00, 0xbb, 0x7f, 0xae,
-    0xf8, 0xa1, 0x6a, 0x95, 0xd5, 0x88, 0x3c, 0x7c, 0x9b, 0x6f, 0xf0, 0x62,
-    0x3b, 0x56, 0x7a, 0x49, 0xac, 0x3c, 0xd0, 0x2f, 0xe5, 0x22, 0xec, 0x15,
-    0xe5, 0x08, 0xd0, 0xfb, 0xac, 0xee, 0x7a, 0xe1, 0x3b, 0xd4, 0xf0, 0xc6,
-    0x9b, 0xb9, 0x3c, 0xac, 0xd5, 0x9e, 0x6a, 0x91, 0xf8, 0x83, 0x7f, 0x76,
-    // Repeat for longer melody
-    0x00, 0x00, 0x7f, 0x0c, 0xf8, 0x18, 0x6a, 0x24, 0xd5, 0x2e, 0x3c, 0x38,
-    0x9b, 0x40, 0xf0, 0x47, 0x3b, 0x4e, 0x7a, 0x53, 0xac, 0x57, 0xd0, 0x5a,
-    0xe5, 0x5c, 0xec, 0x5d, 0xe5, 0x5d, 0xd0, 0x5c, 0xac, 0x5a, 0x7a, 0x57,
-    0x3b, 0x53, 0xf0, 0x4d, 0x9b, 0x47, 0x3c, 0x40, 0xd5, 0x37, 0x6a, 0x2e,
-    0xf8, 0x23, 0x7f, 0x18, 0x00, 0x0c, 0x81, 0xff, 0x08, 0xf2, 0x96, 0xe4,
-    0x2b, 0xd7, 0xc4, 0xc9, 0x65, 0xbc, 0x10, 0xaf, 0xc5, 0xa1, 0x86, 0x94,
-    0x54, 0x87, 0x30, 0x7a, 0x1b, 0x6d, 0x14, 0x60, 0x1b, 0x53, 0x30, 0x46,
-    0x54, 0x39, 0x86, 0x2c, 0xc5, 0x1f, 0x10, 0x13, 0x65, 0x06, 0xc4, 0xf9,
-    0x2b, 0xed, 0x96, 0xe0, 0x08, 0xd4, 0x81, 0xc7, 0x00, 0xbb, 0x7f, 0xae,
-    0xf8, 0xa1, 0x6a, 0x95, 0xd5, 0x88, 0x3c, 0x7c, 0x9b, 0x6f, 0xf0, 0x62,
-    0x3b, 0x56, 0x7a, 0x49, 0xac, 0x3c, 0xd0, 0x2f, 0xe5, 0x22, 0xec, 0x15,
-    0xe5, 0x08, 0xd0, 0xfb, 0xac, 0xee, 0x7a, 0xe1, 0x3b, 0xd4, 0xf0, 0xc6,
-    // Third verse
-    0x9b, 0xb9, 0x3c, 0xac, 0xd5, 0x9e, 0x6a, 0x91, 0xf8, 0x83, 0x7f, 0x76,
-    0x00, 0x00, 0x7f, 0x0c, 0xf8, 0x18, 0x6a, 0x24, 0xd5, 0x2e, 0x3c, 0x38,
-    0x9b, 0x40, 0xf0, 0x47, 0x3b, 0x4e, 0x7a, 0x53, 0xac, 0x57, 0xd0, 0x5a,
-    0xe5, 0x5c, 0xec, 0x5d, 0xe5, 0x5d, 0xd0, 0x5c, 0xac, 0x5a, 0x7a, 0x57,
-    0x3b, 0x53, 0xf0, 0x4d, 0x9b, 0x47, 0x3c, 0x40, 0xd5, 0x37, 0x6a, 0x2e,
-    0xf8, 0x23, 0x7f, 0x18, 0x00, 0x0c, 0x81, 0xff, 0x08, 0xf2, 0x96, 0xe4,
-    0x2b, 0xd7, 0xc4, 0xc9, 0x65, 0xbc, 0x10, 0xaf, 0xc5, 0xa1, 0x86, 0x94,
-    0x54, 0x87, 0x30, 0x7a, 0x1b, 0x6d, 0x14, 0x60, 0x1b, 0x53, 0x30, 0x46,
-];
-
-const SAMPLE_RATE: u32 = 16000;
+const SAMPLE_RATE: u32 = 16000; // Higher sample rate for better FM resolution
 const I2S_DATA_FORMAT: DataFormat = DataFormat::Data16Channel16;
 const I2S_STANDARD: Standard = Standard::Philips;
 
-// DMA Buffer sizes - smaller for ESP32-H2
-const TX_BUFFER_SIZE: usize = 256;
+// DMA Buffer sizes
+const TX_BUFFER_SIZE: usize = 512;
 const RX_BUFFER_SIZE: usize = 256;
 
 #[entry]
 fn main() -> ! {
-    println!("🎵 ESP32-H2 I2S AUDIO SENDER STARTING 🎵");
+    println!("📻 ESP32-H2 I2S FM-STYLE PATTERN GENERATOR 📻");
+    println!("🎵 Creates FM-like patterns using digital square waves!");
     
     let peripherals = Peripherals::take();
-    println!("✅ Peripherals acquired");
-    
     let system = SystemControl::new(peripherals.SYSTEM);
     let clocks = ClockControl::boot_defaults(system.clock_control).freeze();
-    println!("✅ System and clocks initialized");
-    
     let delay = Delay::new(&clocks);
     let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
-    println!("✅ GPIO initialized");
 
     // Status LED
     let mut led = Output::new(io.pins.gpio8, Level::Low);
-    println!("✅ Status LED on GPIO8 configured");
 
-    // LED startup sequence
+    // LED startup
     for i in 1..=3 {
         println!("💡 Startup blink {}/3", i);
         led.set_high();
@@ -100,15 +55,11 @@ fn main() -> ! {
     println!("🔧 Initializing DMA...");
     let dma = Dma::new(peripherals.DMA);
     let dma_channel = dma.channel0.configure(false, DmaPriority::Priority0);
-    println!("✅ DMA configured");
 
-    println!("📊 Creating DMA buffers ({} bytes each)...", TX_BUFFER_SIZE);
-    let (_rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = 
+    let (_rx_buffer, rx_descriptors, _tx_buffer, tx_descriptors) = 
         dma_buffers!(RX_BUFFER_SIZE, TX_BUFFER_SIZE);
-    println!("✅ DMA buffers created");
 
     // Create I2S instance
-    println!("🎵 Creating I2S instance...");
     let i2s = I2s::new(
         peripherals.I2S0,
         I2S_STANDARD,
@@ -119,15 +70,12 @@ fn main() -> ! {
         tx_descriptors,
         &clocks,
     );
-    println!("✅ I2S instance created");
 
     // Configure I2S TX pins
-    println!("📌 Configuring I2S TX pins...");
     let bclk = io.pins.gpio4;
     let ws = io.pins.gpio5;
-    let dout = io.pins.gpio6;
+    let dout = io.pins.gpio12;
     
-    println!("🔧 Building I2S TX interface...");
     let mut i2s_tx = i2s.i2s_tx
         .with_bclk(bclk)
         .with_ws(ws)
@@ -137,85 +85,389 @@ fn main() -> ! {
     println!("✅ I2S TX Configuration Complete:");
     println!("   🔌 BCLK: GPIO4 (Bit Clock)");
     println!("   🔌 WS:   GPIO5 (Word Select/Frame Sync)"); 
-    println!("   🔌 DOUT: GPIO6 (Data Out)");
+    println!("   🔌 DOUT: GPIO12 (FM-Style Data Out)");
     println!("   📊 Sample Rate: {} Hz", SAMPLE_RATE);
-    println!("   📦 Audio Data: {} bytes", HAPPY_BIRTHDAY_AUDIO.len());
-    println!("   🎼 Format: 16-bit Stereo, Philips I2S");
+    println!("   🎼 Format: 16-bit, Philips I2S");
     println!();
-    println!("🚀 Ready to transmit Happy Birthday! 🎂");
-    println!("💡 Connect GPIO4,5,6 to receiver's GPIO4,5,6");
-    println!("📡 Starting transmission loop...");
+    println!("📻 FM-STYLE OSCILLOSCOPE VIEWING:");
+    println!("   📺 Connect oscilloscope to GPIO12 (DOUT)");
+    println!("   📏 Time scale: 10ms/div (see FM frequency changes)");
+    println!("   📏 Time scale: 100ms/div (see complete patterns)");
+    println!("   📈 Voltage scale: 1V/div");
+    println!("   ⚡ Trigger: Rising edge");
+    println!("   🎯 Look for frequency modulation patterns!");
+    println!();
+    println!("🎵 FM Pattern Sequence:");
+    println!("   📻 Frequency Sweep (Low→High→Low)");
+    println!("   📡 AM-like Modulation (Amplitude bursts)");
+    println!("   🌊 Frequency Wobble (Back and forth)");
+    println!("   📊 Step Frequency (Digital frequency steps)");
+    println!("   💫 Chirp Signal (Quick frequency sweep)");
+    println!("   🎶 Musical Scale (Note progression)");
+    println!("   📢 SOS Morse in FM (Emergency signal)");
     println!();
 
-    let mut transmission_count = 0;
-    let chunk_size = 64; // Process in smaller chunks
+    let mut cycle_count = 0;
 
     loop {
-        transmission_count += 1;
-        led.set_high();
+        cycle_count += 1;
         
-        println!("🎵 === TRANSMISSION #{} === 🎵", transmission_count);
+        println!("📻 === FM PATTERN CYCLE #{} === 📻", cycle_count);
         
-        // Send audio data in chunks
-        let mut bytes_sent = 0;
-        let mut chunk_count = 0;
-        
-        while bytes_sent < HAPPY_BIRTHDAY_AUDIO.len() {
-            let remaining = HAPPY_BIRTHDAY_AUDIO.len() - bytes_sent;
-            let current_chunk_size = remaining.min(chunk_size);
+        // FM Pattern 1: Frequency Sweep (Low to High to Low)
+        {
+            led.set_high();
+            println!("🎵 FM Pattern 1/7: Frequency Sweep");
+            println!("   📻 Frequency gradually increases then decreases");
             
-            // Ensure chunk_size is even (for 16-bit samples)
-            let current_chunk_size = current_chunk_size & !1;
-            
-            if current_chunk_size == 0 {
-                break;
-            }
-            
-            chunk_count += 1;
-            
-            // Convert bytes to u16 words for I2S
-            let word_count = current_chunk_size / 2;
-            let mut words: [u16; 32] = [0; 32]; // Max 64 bytes / 2
-            
-            for i in 0..word_count {
-                let byte_idx = bytes_sent + (i * 2);
-                if byte_idx + 1 < HAPPY_BIRTHDAY_AUDIO.len() {
-                    // Convert little-endian bytes to u16
-                    words[i] = u16::from_le_bytes([
-                        HAPPY_BIRTHDAY_AUDIO[byte_idx],
-                        HAPPY_BIRTHDAY_AUDIO[byte_idx + 1]
-                    ]);
+            // Create frequency sweep using varying square wave patterns
+            for sweep in 0..40 {
+                let mut pattern = [0u16; 32];
+                
+                // Calculate frequency: low at start/end, high in middle
+                let freq_factor = if sweep < 20 {
+                    sweep + 1  // Increasing frequency
+                } else {
+                    41 - sweep // Decreasing frequency
+                };
+                
+                // Create square wave with varying frequency
+                let half_period = 32 / (freq_factor / 2).max(1);
+                for i in 0..32 {
+                    pattern[i] = if (i / half_period) % 2 == 0 {
+                        0x8000  // High
+                    } else {
+                        0x0000  // Low
+                    };
                 }
-            }
-            
-            // Send the chunk
-            match i2s_tx.write(&words[..word_count]) {
-                Ok(_) => {
-                    if chunk_count % 10 == 0 {
-                        println!("   📤 Chunk {}: {} words sent", chunk_count, word_count);
+                
+                match i2s_tx.write(&pattern) {
+                    Ok(_) => {
+                        if sweep % 10 == 0 {
+                            println!("   📊 Sweep progress: {}%", (sweep * 100) / 40);
+                        }
+                    }
+                    Err(e) => {
+                        println!("   ❌ Error: {:?}", e);
+                        break;
                     }
                 }
-                Err(e) => {
-                    println!("   ❌ Error sending chunk {}: {:?}", chunk_count, e);
-                    break;
-                }
+                delay.delay_millis(50);
             }
             
-            bytes_sent += current_chunk_size;
-            delay.delay_millis(5); // Small delay between chunks
+            led.set_low();
+            println!("   ✅ Frequency sweep complete");
+            delay.delay_millis(300);
         }
         
-        led.set_low();
-        
-        println!("✅ Transmission complete!");
-        println!("   📊 Sent: {} bytes in {} chunks", bytes_sent, chunk_count);
-        println!("   🎵 Happy Birthday melody transmitted!");
-        
-        if transmission_count % 5 == 0 {
-            println!("🎂 Happy Birthday! 🎉 (Transmission #{})", transmission_count);
+        // FM Pattern 2: AM-like Modulation (Amplitude Bursts)
+        {
+            led.set_high();
+            println!("🎵 FM Pattern 2/7: AM-like Amplitude Modulation");
+            println!("   📡 Square wave with varying amplitude envelopes");
+            
+            for burst in 0..20 {
+                let mut pattern = [0u16; 32];
+                
+                // Create envelope: amplitude varies in a wave pattern
+                let envelope = if burst < 5 {
+                    (burst as f32) / 5.0  // Rising
+                } else if burst < 15 {
+                    1.0  // Peak
+                } else {
+                    (20 - burst) as f32 / 5.0  // Falling
+                };
+                let amplitude = (envelope * 32767.0) as u16;
+                
+                // Create square wave with modulated amplitude
+                for i in 0..32 {
+                    pattern[i] = if i % 4 < 2 {
+                        amplitude  // High with envelope
+                    } else {
+                        0x0000     // Low
+                    };
+                }
+                
+                match i2s_tx.write(&pattern) {
+                    Ok(_) => {
+                        if burst % 5 == 0 {
+                            println!("   📊 AM burst: {}/20 (envelope: {:.1}%)", burst + 1, envelope * 100.0);
+                        }
+                    }
+                    Err(e) => {
+                        println!("   ❌ Error: {:?}", e);
+                        break;
+                    }
+                }
+                delay.delay_millis(75);
+            }
+            
+            led.set_low();
+            println!("   ✅ AM modulation complete");
+            delay.delay_millis(300);
         }
         
-        println!("⏳ Waiting 3 seconds before next transmission...\n");
+        // FM Pattern 3: Frequency Wobble (Back and Forth)
+        {
+            led.set_high();
+            println!("🎵 FM Pattern 3/7: Frequency Wobble");
+            println!("   🌊 Frequency oscillates back and forth");
+            
+            for wobble in 0..30 {
+                let mut pattern = [0u16; 32];
+                
+                // Create wobbling frequency (triangle wave frequency modulation)
+                let wobble_factor = if wobble < 8 {
+                    3 + wobble  // Rising frequency
+                } else if wobble < 23 {
+                    11  // Peak frequency
+                } else {
+                    33 - wobble  // Falling frequency
+                } as usize;
+                let period = (32 / wobble_factor).max(2);
+                
+                for i in 0..32 {
+                    pattern[i] = if (i / period) % 2 == 0 {
+                        0x8000  // High
+                    } else {
+                        0x0000  // Low
+                    };
+                }
+                
+                match i2s_tx.write(&pattern) {
+                    Ok(_) => {
+                        if wobble % 8 == 0 {
+                            println!("   🌊 Wobble cycle: {}/30", wobble + 1);
+                        }
+                    }
+                    Err(e) => {
+                        println!("   ❌ Error: {:?}", e);
+                        break;
+                    }
+                }
+                delay.delay_millis(60);
+            }
+            
+            led.set_low();
+            println!("   ✅ Frequency wobble complete");
+            delay.delay_millis(300);
+        }
+        
+        // FM Pattern 4: Step Frequency (Digital Steps)
+        {
+            led.set_high();
+            println!("🎵 FM Pattern 4/7: Step Frequency Changes");
+            println!("   📊 Discrete frequency steps (digital tuning)");
+            
+            let frequencies = [2, 4, 6, 8, 12, 16, 8, 4]; // Different step frequencies
+            
+            for (step, &freq) in frequencies.iter().enumerate() {
+                let mut pattern = [0u16; 32];
+                let period = (32 / freq).max(1);
+                
+                for i in 0..32 {
+                    pattern[i] = if (i / period) % 2 == 0 {
+                        0x8000  // High
+                    } else {
+                        0x0000  // Low
+                    };
+                }
+                
+                println!("   📻 Step {}: Frequency {} (period {})", step + 1, freq, period);
+                
+                // Repeat each frequency step multiple times
+                for repeat in 0..8 {
+                    match i2s_tx.write(&pattern) {
+                        Ok(_) => {},
+                        Err(e) => {
+                            println!("   ❌ Error: {:?}", e);
+                            break;
+                        }
+                    }
+                    delay.delay_millis(40);
+                }
+                
+                delay.delay_millis(100); // Pause between steps
+            }
+            
+            led.set_low();
+            println!("   ✅ Step frequency complete");
+            delay.delay_millis(300);
+        }
+        
+        // FM Pattern 5: Chirp Signal (Quick Frequency Sweep)
+        {
+            led.set_high();
+            println!("🎵 FM Pattern 5/7: Chirp Signal");
+            println!("   💫 Rapid frequency sweep (radar-like chirp)");
+            
+            for chirp in 0..3 { // 3 chirp cycles
+                println!("   💫 Chirp {}/3", chirp + 1);
+                
+                // Quick frequency sweep from low to high
+                for freq_step in 1..=16 {
+                    let mut pattern = [0u16; 32];
+                    let period = (32 / freq_step).max(1);
+                    
+                    for i in 0..32 {
+                        pattern[i] = if (i / period) % 2 == 0 {
+                            0x8000  // High
+                        } else {
+                            0x0000  // Low
+                        };
+                    }
+                    
+                    match i2s_tx.write(&pattern) {
+                        Ok(_) => {},
+                        Err(e) => {
+                            println!("   ❌ Error: {:?}", e);
+                            break;
+                        }
+                    }
+                    delay.delay_millis(20); // Quick sweep
+                }
+                
+                delay.delay_millis(200); // Pause between chirps
+            }
+            
+            led.set_low();
+            println!("   ✅ Chirp signal complete");
+            delay.delay_millis(300);
+        }
+        
+        // FM Pattern 6: Musical Scale (Note Progression)
+        {
+            led.set_high();
+            println!("🎵 FM Pattern 6/7: Musical Scale");
+            println!("   🎶 Frequency steps mimicking musical notes");
+            
+            // Musical scale frequencies (simplified as periods)
+            let notes = [16, 14, 12, 11, 10, 9, 8, 7]; // Descending scale
+            let note_names = ["C", "D", "E", "F", "G", "A", "B", "C"];
+            
+            for (note_idx, &note_period) in notes.iter().enumerate() {
+                let mut pattern = [0u16; 32];
+                
+                for i in 0..32 {
+                    pattern[i] = if (i / note_period) % 2 == 0 {
+                        0x8000  // High
+                    } else {
+                        0x0000  // Low
+                    };
+                }
+                
+                println!("   🎵 Note {}: {} (period {})", note_idx + 1, note_names[note_idx], note_period);
+                
+                // Play each note
+                for repeat in 0..6 {
+                    match i2s_tx.write(&pattern) {
+                        Ok(_) => {},
+                        Err(e) => {
+                            println!("   ❌ Error: {:?}", e);
+                            break;
+                        }
+                    }
+                    delay.delay_millis(80);
+                }
+                
+                delay.delay_millis(50); // Brief pause between notes
+            }
+            
+            led.set_low();
+            println!("   ✅ Musical scale complete");
+            delay.delay_millis(300);
+        }
+        
+        // FM Pattern 7: SOS Morse in FM
+        {
+            led.set_high();
+            println!("🎵 FM Pattern 7/7: SOS Morse Code in FM");
+            println!("   📢 Emergency signal using frequency modulation");
+            
+            // SOS: ... --- ... (3 dots, 3 dashes, 3 dots)
+            let sos_pattern = [
+                (8, 4),   // S: dot (high freq, short)
+                (8, 4),   // S: dot  
+                (8, 4),   // S: dot
+                (0, 8),   // Gap
+                (4, 12),  // O: dash (low freq, long)
+                (4, 12),  // O: dash
+                (4, 12),  // O: dash  
+                (0, 8),   // Gap
+                (8, 4),   // S: dot
+                (8, 4),   // S: dot
+                (8, 4),   // S: dot
+            ];
+            
+            for sos_cycle in 0..2 {
+                println!("   📢 SOS transmission {}/2", sos_cycle + 1);
+                
+                for (freq, duration) in sos_pattern.iter() {
+                    if *freq == 0 {
+                        // Silence (gap)
+                        let silence = [0u16; 32];
+                        for _ in 0..*duration {
+                            match i2s_tx.write(&silence) {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    println!("   ❌ Error: {:?}", e);
+                                    break;
+                                }
+                            }
+                            delay.delay_millis(50);
+                        }
+                    } else {
+                        // Tone with specific frequency
+                        let mut pattern = [0u16; 32];
+                        let period = 32 / freq;
+                        
+                        for i in 0..32 {
+                            pattern[i] = if (i / period) % 2 == 0 {
+                                0x8000  // High
+                            } else {
+                                0x0000  // Low
+                            };
+                        }
+                        
+                        for _ in 0..*duration {
+                            match i2s_tx.write(&pattern) {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    println!("   ❌ Error: {:?}", e);
+                                    break;
+                                }
+                            }
+                            delay.delay_millis(50);
+                        }
+                    }
+                }
+                
+                delay.delay_millis(1000); // Long pause between SOS cycles
+            }
+            
+            led.set_low();
+            println!("   ✅ SOS transmission complete");
+            delay.delay_millis(300);
+        }
+        
+        println!("✅ Complete FM-style pattern cycle transmitted!");
+        println!("   📻 All 7 FM patterns sent via I2S");
+        println!("   🎵 Patterns visible as frequency modulation on GPIO12");
+        println!("   📊 Total cycle duration: ~25 seconds");
+        println!("   🔍 Observe different FM characteristics:");
+        println!("      📻 Frequency sweeps (smooth changes)");
+        println!("      📡 Amplitude modulation (burst patterns)");  
+        println!("      🌊 Frequency wobbling (oscillation)");
+        println!("      📊 Digital frequency steps");
+        println!("      💫 Chirp signals (radar-like)");
+        println!("      🎶 Musical note progression");
+        println!("      📢 Morse code in FM");
+        
+        if cycle_count % 2 == 0 {
+            println!("🎉 FM Cycle #{} complete - Check oscilloscope for patterns! 📻", cycle_count);
+        }
+        
+        println!("⏳ Next FM cycle in 3 seconds...\n");
         delay.delay_millis(3000);
     }
 }

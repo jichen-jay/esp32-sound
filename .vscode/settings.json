@@ -1,0 +1,21 @@
+{
+    "rust-analyzer.server.extraEnv": {
+        "RUSTUP_TOOLCHAIN": "esp"
+    },
+    "rust-analyzer.cargo.target": "riscv32imc-unknown-none-elf",
+    "rust-analyzer.cargo.features": [
+        "esp32h2",
+        "octal-psram"
+    ],
+    "rust-analyzer.cargo.buildScripts.enable": true,
+    "rust-analyzer.rustc.source": "discover",
+    "rust-analyzer.cargo.extraEnv": {
+        "ESP_HAL_CONFIG_PSRAM_MODE": "octal"
+    },
+    "rust-analyzer.checkOnSave": false,
+    "rust-analyzer.check.allTargets": false,
+    "rust-analyzer.completion.privateEditable.enable": true,
+    "rust-analyzer.inlayHints.lifetimeElisionHints.enable": "never",
+    "rust-analyzer.check.features": "all",
+    "rust-analyzer.procMacro.enable": true
+}
